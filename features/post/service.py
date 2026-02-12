@@ -3,6 +3,7 @@ import os
 import subprocess
 import uuid
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -13,11 +14,17 @@ from .models import Post, PostType, PostStatus
 
 logger = logging.getLogger(__name__)
 
+# Find FFmpeg/FFprobe executables - use full path on Windows to avoid PATH issues
+FFMPEG_PATH = shutil.which("ffmpeg") or "ffmpeg"
+FFPROBE_PATH = shutil.which("ffprobe") or "ffprobe"
+logger.info(f"FFmpeg path: {FFMPEG_PATH}")
+logger.info(f"FFprobe path: {FFPROBE_PATH}")
+
 # Directories
-UPLOAD_RAW_DIR = "uploads/raw"
-UPLOAD_COMPRESSED_DIR = "uploads/compressed"
-UPLOAD_IMAGES_DIR = "uploads/images"
-UPLOAD_THUMBNAILS_DIR = "uploads/thumbnails"
+UPLOAD_RAW_DIR = os.path.abspath("uploads/raw")
+UPLOAD_COMPRESSED_DIR = os.path.abspath("uploads/compressed")
+UPLOAD_IMAGES_DIR = os.path.abspath("uploads/images")
+UPLOAD_THUMBNAILS_DIR = os.path.abspath("uploads/thumbnails")
 
 # Video
 FFMPEG_PRESET = "fast"
@@ -44,20 +51,24 @@ class PostService:
         music_name: str | None = None,
     ) -> Post:
         """Create a new post with type=VIDEO and status=PROCESSING."""
+        # Normalize path to fix Windows backslash issues
+        logger.info(f"Original raw_file_path: {repr(raw_file_path)}")
+        normalized_path = os.path.normpath(raw_file_path)
+        logger.info(f"Normalized path: {repr(normalized_path)}")
         post = Post(
             author_id=author_id,
             type=PostType.VIDEO,
             description=description or "",
             music_name=music_name or "Original Sound",
             original_filename=original_filename,
-            raw_file_path=raw_file_path,
+            raw_file_path=normalized_path,
             file_size=file_size,
             status=PostStatus.PROCESSING,
         )
         db.add(post)
         await db.commit()
         await db.refresh(post)
-        logger.info(f"Created video post id={post.id}, filename={original_filename}")
+        logger.info(f"Created video post id={post.id}, filename={original_filename}, path={normalized_path}")
         return post
 
     @staticmethod
@@ -170,8 +181,13 @@ class PostService:
     def get_video_duration(file_path: str) -> int | None:
         """Get video duration in seconds using FFprobe."""
         try:
+            logger.info(f"Getting video duration for: {file_path}")
+            if not os.path.exists(file_path):
+                logger.error(f"Video file does not exist: {file_path}")
+                return None
+                
             cmd = [
-                "ffprobe",
+                FFPROBE_PATH,
                 "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
@@ -179,10 +195,23 @@ class PostService:
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
-                return int(float(result.stdout.strip()))
+                duration_str = result.stdout.strip()
+                if duration_str:
+                    duration = int(float(duration_str))
+                    logger.info(f"Video duration: {duration} seconds")
+                    return duration
+                else:
+                    logger.error("FFprobe returned empty duration")
+                    return None
+            else:
+                logger.error(f"FFprobe failed with return code {result.returncode}: {result.stderr}")
+                return None
+        except subprocess.TimeoutExpired:
+            logger.error("FFprobe timeout while getting video duration")
+            return None
         except Exception as e:
             logger.error(f"Failed to get video duration: {e}")
-        return None
+            return None
 
     @staticmethod
     def compress_video_sync(
@@ -195,7 +224,7 @@ class PostService:
         """Compress video with FFmpeg. Returns True on success."""
         try:
             cmd = [
-                "ffmpeg",
+                FFMPEG_PATH,
                 "-y",
                 "-i", input_path,
                 "-vf", f"scale=-2:{max_height}",
@@ -236,7 +265,7 @@ class PostService:
         try:
             # -ss trước -i: fast seek (không decode toàn bộ). -vframes 1: 1 frame. -q:v 2: chất lượng JPEG.
             cmd = [
-                "ffmpeg",
+                FFMPEG_PATH,
                 "-y",
                 "-ss", str(seek_seconds),
                 "-i", video_path,
@@ -254,7 +283,7 @@ class PostService:
                 return True
             # Fallback: lấy frame tại 0 (đầu video) nếu seek vượt duration
             cmd_fallback = [
-                "ffmpeg",
+                FFMPEG_PATH,
                 "-y",
                 "-i", video_path,
                 "-vframes", "1",
@@ -300,6 +329,24 @@ async def process_video_background(post_id: int, raw_file_path: str):
     from database import async_session_maker
 
     logger.info(f"Starting background processing for post (video) {post_id}")
+    
+    # Convert to absolute path to avoid working directory issues
+    if not os.path.isabs(raw_file_path):
+        raw_file_path = os.path.abspath(raw_file_path)
+    
+    logger.info(f"Raw file path (absolute): {raw_file_path}")
+    
+    # Check if file exists before processing
+    if not os.path.exists(raw_file_path):
+        logger.error(f"Raw video file not found: {raw_file_path}")
+        async with async_session_maker() as db:
+            await PostService.update_post_status(
+                db=db,
+                post_id=post_id,
+                status=PostStatus.FAILED,
+                error_message="Source video file not found",
+            )
+        return
 
     output_filename = f"{uuid.uuid4().hex}.mp4"
     output_path = os.path.join(UPLOAD_COMPRESSED_DIR, output_filename)
