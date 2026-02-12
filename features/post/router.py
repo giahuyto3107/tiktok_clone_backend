@@ -76,7 +76,8 @@ async def upload_video(
         )
 
     unique_filename = PostService.generate_unique_filename(file.filename, for_video=True)
-    raw_file_path = os.path.join(UPLOAD_RAW_DIR, unique_filename)
+    raw_file_path = os.path.normpath(os.path.join(UPLOAD_RAW_DIR, unique_filename))
+    logger.info(f"Router created raw_file_path: {repr(raw_file_path)}")
 
     try:
         with open(raw_file_path, "wb") as f:
@@ -135,7 +136,7 @@ async def upload_image(
         )
 
     unique_filename = PostService.generate_unique_filename(file.filename, for_video=False)
-    image_path = os.path.join(UPLOAD_IMAGES_DIR, unique_filename)
+    image_path = os.path.normpath(os.path.join(UPLOAD_IMAGES_DIR, unique_filename))
 
     try:
         with open(image_path, "wb") as f:
