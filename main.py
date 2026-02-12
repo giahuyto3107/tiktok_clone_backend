@@ -3,16 +3,21 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from features.video.router import router as video_router
+from features.post.router import router as post_router
 
-# Create upload directories
+# Create upload directories (raw, compressed, images, thumbnails for video)
 UPLOAD_RAW_DIR = "uploads/raw"
 UPLOAD_COMPRESSED_DIR = "uploads/compressed"
+UPLOAD_IMAGES_DIR = "uploads/images"
+UPLOAD_THUMBNAILS_DIR = "uploads/thumbnails"
 
 os.makedirs(UPLOAD_RAW_DIR, exist_ok=True)
 os.makedirs(UPLOAD_COMPRESSED_DIR, exist_ok=True)
+os.makedirs(UPLOAD_IMAGES_DIR, exist_ok=True)
+os.makedirs(UPLOAD_THUMBNAILS_DIR, exist_ok=True)
 
 
 @asynccontextmanager
@@ -33,11 +38,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Mount static files for serving videos
+# Enable CORS for mobile app access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (for development; restrict in production)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
+
+# Mount static files for serving media (videos + images)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Include routers
-app.include_router(video_router, prefix="/api/v1/videos", tags=["Videos"])
+app.include_router(post_router, prefix="/api/v1/posts", tags=["Posts"])
+
+
+@app.get("/api/v1")
+async def api_v1_root():
+    return {
+        "message": "TikTok Clone API v1",
+        "routes": {
+            "posts": "/api/v1/posts",
+            "docs": "/docs",
+            "health": "/health",
+        },
+    }
 
 
 @app.get("/")
@@ -52,4 +78,8 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    print("🌐 Starting server with HTTP")
+    print("   Access at: http://YOUR_WIFI_IP:8000")
+    print("   Note: Configure Android app to allow cleartext HTTP (see docs/ANDROID_CLEARTEXT_SETUP.md)")
+    print()
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -237,8 +237,9 @@ uploads/
 media/
 static/uploads/
 
-# Secrets
+# Secrets & SSL Certificates
 secrets/
+certs/
 *.pem
 *.key
 *.crt
