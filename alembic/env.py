@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import Base, DATABASE_URL
 
 # Import all models for autogenerate support
-from features.video.models import Video
+from features.post.models import Post
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

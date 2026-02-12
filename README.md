@@ -44,33 +44,41 @@ FastAPI backend server for Tiktok Backend application.
 
 6. **Run the application**
    
-   **Development mode (with auto-reload):**
+   **Development mode (with auto-reload and WiFi access):**
    ```bash
    # Option 1: FastAPI CLI (recommended)
-   fastapi dev app/main.py
+   fastapi dev main.py --host 0.0.0.0 --port 8000
    
-   # Option 2: Uvicorn
-   uvicorn app.main:app --reload
+   # Option 2: Python script
+   python main.py
+   
+   # Option 3: Uvicorn directly
+   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
    ```
    
    **Production mode:**
    ```bash
    # Option 1: FastAPI CLI
-   fastapi run app/main.py
+   fastapi run main.py --host 0.0.0.0 --port 8000
    
    # Option 2: Uvicorn with workers
-   uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+   uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
    ```
 
 7. **Access the API**
-   - API: http://localhost:8000
+   - Local: http://localhost:8000
+   - WiFi IP: http://YOUR_WIFI_IP:8000 (for mobile app access)
    - Documentation: http://localhost:8000/docs
    - Alternative Docs: http://localhost:8000/redoc
+   
+   **Note:** Use `--host 0.0.0.0` to allow access from mobile devices on the same WiFi network.
+   For Android app configuration, see [Android Cleartext Setup](./docs/ANDROID_CLEARTEXT_SETUP.md).
 
 ## 📚 Documentation
 
 - [Setup Guide](./docs/SETUP.md) - Detailed setup instructions for new developers
 - [Dependencies Guide](./docs/DEPENDENCIES.md) - How to manage external libraries
+- [Android Cleartext Setup](./docs/ANDROID_CLEARTEXT_SETUP.md) - Configure Android app for HTTP access
 
 ## ⚠️ Important Notes
 
@@ -87,8 +95,9 @@ FastAPI backend server for Tiktok Backend application.
 source .venv/bin/activate  # Linux/Mac
 
 # Run development server (choose one)
-fastapi dev app/main.py          # FastAPI CLI (recommended, auto-reload)
-uvicorn app.main:app --reload    # Uvicorn (traditional)
+fastapi dev main.py --host 0.0.0.0 --port 8000  # FastAPI CLI (recommended, WiFi access)
+python main.py                                   # Python script (WiFi access)
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload  # Uvicorn (traditional)
 
 # Run tests
 pytest
@@ -98,13 +107,13 @@ pytest
 
 ```bash
 # Option 1: FastAPI CLI
-fastapi run app/main.py
+fastapi run main.py --host 0.0.0.0 --port 8000
 
 # Option 2: Uvicorn with multiple workers
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 
 # Option 3: With custom configuration
-uvicorn app.main:app \
+uvicorn main:app \
   --host 0.0.0.0 \
   --port 8000 \
   --workers 4 \
