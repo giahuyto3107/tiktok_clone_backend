@@ -43,7 +43,7 @@ class PostService:
     @staticmethod
     async def create_video_post(
         db: AsyncSession,
-        author_id: int,
+        user_id: str,
         original_filename: str,
         raw_file_path: str,
         file_size: int,
@@ -56,7 +56,7 @@ class PostService:
         normalized_path = os.path.normpath(raw_file_path)
         logger.info(f"Normalized path: {repr(normalized_path)}")
         post = Post(
-            author_id=author_id,
+            user_id=user_id,
             type=PostType.VIDEO,
             description=description or "",
             music_name=music_name or "Original Sound",
@@ -74,14 +74,14 @@ class PostService:
     @staticmethod
     async def create_image_post(
         db: AsyncSession,
-        author_id: int,
+        user_id: str,
         media_url: str,
         description: str | None = None,
         music_name: str | None = None,
     ) -> Post:
         """Create a new post with type=IMAGE, status=READY, media_url set."""
         post = Post(
-            author_id=author_id,
+            user_id=user_id,
             type=PostType.IMAGE,
             media_url=media_url,
             thumbnail_url=media_url,  # image: use same as media

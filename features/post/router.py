@@ -48,7 +48,7 @@ def get_thumbnail_url(post) -> Optional[str]:
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    author_id: Optional[int] = Form(0),
+    user_id: Optional[str] = Form("0"),
     description: Optional[str] = Form(None),
     music_name: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
@@ -89,7 +89,7 @@ async def upload_video(
 
     post = await PostService.create_video_post(
         db=db,
-        author_id=author_id or 0,
+        user_id=user_id or "0",
         original_filename=file.filename,
         raw_file_path=raw_file_path,
         file_size=file_size,
@@ -108,7 +108,7 @@ async def upload_video(
 @router.post("/upload/image", response_model=PostUploadResponse)
 async def upload_image(
     file: UploadFile = File(...),
-    author_id: Optional[int] = Form(0),
+    user_id: Optional[str] = Form("0"),
     description: Optional[str] = Form(None),
     music_name: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
@@ -149,7 +149,7 @@ async def upload_image(
     media_url = f"/uploads/images/{unique_filename}"
     post = await PostService.create_image_post(
         db=db,
-        author_id=author_id or 0,
+        user_id=user_id or "0",
         media_url=media_url,
         description=description,
         music_name=music_name,

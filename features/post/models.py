@@ -25,7 +25,7 @@ class Post(Base):
     __tablename__ = "posts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    author_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, default="0")
 
     # Content type and public URLs (client-facing)
     type: Mapped[PostType] = mapped_column(Enum(PostType), default=PostType.VIDEO, nullable=False)
