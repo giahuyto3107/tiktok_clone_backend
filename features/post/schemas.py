@@ -1,5 +1,4 @@
 # features/post/schemas.py - Pydantic Schemas for Post (aligned with client)
-from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 

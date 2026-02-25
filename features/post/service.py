@@ -4,7 +4,6 @@ import subprocess
 import uuid
 import logging
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -361,7 +360,6 @@ async def process_video_background(post_id: int, raw_file_path: str):
         preset=FFMPEG_PRESET,
     )
 
-    thumbnail_path: str | None = None
     thumbnail_url: str | None = None
 
     if success:
