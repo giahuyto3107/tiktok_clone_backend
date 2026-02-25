@@ -1,5 +1,4 @@
 # features/post/schemas.py - Pydantic Schemas for Post (aligned with client)
-from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,14 +10,14 @@ class PostCreate(BaseModel):
     """Schema for creating a post (form data)"""
     title: Optional[str] = None
     description: Optional[str] = None
-    author_id: Optional[int] = Field(None, alias="authorId")
+    user_id: Optional[str] = Field(None, alias="userId")
 
 
 # --- Response schemas (camelCase for client) ---
 class PostResponse(BaseModel):
     """Post response matching client Post data class"""
     id: int
-    author_id: int = Field(..., serialization_alias="authorId")
+    user_id: str = Field(..., serialization_alias="userId")
     type: PostType
     media_url: str = Field("", serialization_alias="mediaUrl")
     thumbnail_url: str = Field("", serialization_alias="thumbnailUrl")
@@ -35,7 +34,7 @@ class PostResponse(BaseModel):
         """Build response from ORM with created_at as milliseconds."""
         return cls(
             id=post.id,
-            author_id=post.author_id,
+            user_id=post.user_id,
             type=post.type,
             media_url=post.media_url or "",
             thumbnail_url=post.thumbnail_url or "",
