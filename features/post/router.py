@@ -49,7 +49,7 @@ async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: Optional[str] = Form("0"),
-    description: Optional[str] = Form(None),
+    caption: Optional[str] = Form(None),
     music_name: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -93,7 +93,7 @@ async def upload_video(
         original_filename=file.filename,
         raw_file_path=raw_file_path,
         file_size=file_size,
-        description=description,
+        caption=caption,
         music_name=music_name,
     )
     background_tasks.add_task(process_video_background, post.id, raw_file_path)
@@ -109,7 +109,7 @@ async def upload_video(
 async def upload_image(
     file: UploadFile = File(...),
     user_id: Optional[str] = Form("0"),
-    description: Optional[str] = Form(None),
+    caption: Optional[str] = Form(None),
     music_name: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -151,7 +151,7 @@ async def upload_image(
         db=db,
         user_id=user_id or "0",
         media_url=media_url,
-        description=description,
+        caption=caption,
         music_name=music_name,
     )
 
