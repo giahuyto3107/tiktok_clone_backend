@@ -6,7 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
+from core.firebase import init_firebase
 from features.post.router import router as post_router
+from features.user.router import router as user_router
 
 # Create upload directories (raw, compressed, images, thumbnails for video)
 UPLOAD_RAW_DIR = "uploads/raw"
@@ -26,6 +28,9 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize database tables
     await init_db()
     print("✅ Database initialized")
+
+    # Startup: Initialize Firebase Admin SDK
+    init_firebase()
     yield
     # Shutdown: Cleanup if needed
     print("👋 Application shutting down")
@@ -52,6 +57,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Include routers
 app.include_router(post_router, prefix="/api/v1/posts", tags=["Posts"])
+app.include_router(user_router, prefix="/api/v1/users", tags=["Users"])
 
 
 @app.get("/api/v1")

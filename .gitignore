@@ -237,6 +237,9 @@ uploads/
 media/
 static/uploads/
 
+# Firebase
+firebase-service-account.json
+
 # Secrets & SSL Certificates
 secrets/
 certs/

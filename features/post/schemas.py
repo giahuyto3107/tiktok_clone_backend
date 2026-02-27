@@ -9,7 +9,7 @@ from .models import PostType, PostStatus
 class PostCreate(BaseModel):
     """Schema for creating a post (form data)"""
     title: Optional[str] = None
-    description: Optional[str] = None
+    caption: Optional[str] = None
     user_id: Optional[str] = Field(None, alias="userId")
 
 
@@ -21,7 +21,7 @@ class PostResponse(BaseModel):
     type: PostType
     media_url: str = Field("", serialization_alias="mediaUrl")
     thumbnail_url: str = Field("", serialization_alias="thumbnailUrl")
-    description: str = ""
+    caption: str = ""
     music_name: str = Field("Original Sound", serialization_alias="musicName")
     like_count: int = Field(0, serialization_alias="likeCount")
     comment_count: int = Field(0, serialization_alias="commentCount")
@@ -38,7 +38,7 @@ class PostResponse(BaseModel):
             type=post.type,
             media_url=post.media_url or "",
             thumbnail_url=post.thumbnail_url or "",
-            description=post.description or "",
+            caption=post.caption or "",
             music_name=post.music_name or "Original Sound",
             like_count=post.like_count or 0,
             comment_count=post.comment_count or 0,

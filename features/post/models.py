@@ -31,7 +31,7 @@ class Post(Base):
     type: Mapped[PostType] = mapped_column(Enum(PostType), default=PostType.VIDEO, nullable=False)
     media_url: Mapped[str] = mapped_column(String(512), nullable=True, default="")
     thumbnail_url: Mapped[str] = mapped_column(String(512), nullable=True, default="")
-    description: Mapped[str] = mapped_column(Text, nullable=True, default="")
+    caption: Mapped[str] = mapped_column(Text, nullable=True, default="")
     music_name: Mapped[str] = mapped_column(String(255), nullable=False, default="Original Sound")
 
     # Counts

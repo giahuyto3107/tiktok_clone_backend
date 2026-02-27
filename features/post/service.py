@@ -46,7 +46,7 @@ class PostService:
         original_filename: str,
         raw_file_path: str,
         file_size: int,
-        description: str | None = None,
+        caption: str | None = None,
         music_name: str | None = None,
     ) -> Post:
         """Create a new post with type=VIDEO and status=PROCESSING."""
@@ -57,7 +57,7 @@ class PostService:
         post = Post(
             user_id=user_id,
             type=PostType.VIDEO,
-            description=description or "",
+            caption=caption or "",
             music_name=music_name or "Original Sound",
             original_filename=original_filename,
             raw_file_path=normalized_path,
@@ -75,7 +75,7 @@ class PostService:
         db: AsyncSession,
         user_id: str,
         media_url: str,
-        description: str | None = None,
+        caption: str | None = None,
         music_name: str | None = None,
     ) -> Post:
         """Create a new post with type=IMAGE, status=READY, media_url set."""
@@ -84,7 +84,7 @@ class PostService:
             type=PostType.IMAGE,
             media_url=media_url,
             thumbnail_url=media_url,  # image: use same as media
-            description=description or "",
+            caption=caption or "",
             music_name=music_name or "Original Sound",
             status=PostStatus.READY,
         )
