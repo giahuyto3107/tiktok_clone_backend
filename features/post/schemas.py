@@ -14,6 +14,14 @@ class PostCreate(BaseModel):
 
 
 # --- Response schemas (camelCase for client) ---
+class PostAuthor(BaseModel):
+    """Embedded author info resolved from Firebase Auth"""
+    uid: str
+    display_name: Optional[str] = Field(None, serialization_alias="displayName")
+    avatar_url: Optional[str] = Field(None, serialization_alias="avatarUrl")
+    email: Optional[str] = None
+
+
 class PostResponse(BaseModel):
     """Post response matching client Post data class"""
     id: int
@@ -23,9 +31,8 @@ class PostResponse(BaseModel):
     thumbnail_url: str = Field("", serialization_alias="thumbnailUrl")
     caption: str = ""
     music_name: str = Field("Original Sound", serialization_alias="musicName")
-    like_count: int = Field(0, serialization_alias="likeCount")
-    comment_count: int = Field(0, serialization_alias="commentCount")
     created_at: int = Field(..., serialization_alias="createdAt")  # milliseconds
+    author: Optional[PostAuthor] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,8 +47,6 @@ class PostResponse(BaseModel):
             thumbnail_url=post.thumbnail_url or "",
             caption=post.caption or "",
             music_name=post.music_name or "Original Sound",
-            like_count=post.like_count or 0,
-            comment_count=post.comment_count or 0,
             created_at=int(post.created_at.timestamp() * 1000) if post.created_at else 0,
         )
 

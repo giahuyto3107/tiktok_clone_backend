@@ -3,7 +3,7 @@ import os
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -11,10 +11,12 @@ from .models import PostType, PostStatus
 from .schemas import (
     PostUploadResponse,
     PostResponse,
+    PostAuthor,
     PostStatusResponse,
     PostListResponse,
 )
 from .service import PostService, process_video_background
+from firebase_admin import auth as firebase_auth
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,14 @@ ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
+def make_absolute_url(request: Request, relative_path: str | None) -> str | None:
+    """Convert a relative media path to an absolute URL using the request's base URL."""
+    if not relative_path:
+        return None
+    base = str(request.base_url).rstrip("/")
+    return f"{base}{relative_path}"
+
+
 def get_media_url(post) -> Optional[str]:
     """Public media URL for a post (video or image)."""
     if post.type == PostType.IMAGE:
@@ -35,6 +45,20 @@ def get_media_url(post) -> Optional[str]:
     if post.status == PostStatus.READY and post.media_url:
         return post.media_url
     return None
+
+
+def resolve_author(user_id: str) -> Optional[PostAuthor]:
+    """Look up Firebase user by UID and return a PostAuthor, or None."""
+    try:
+        user = firebase_auth.get_user(user_id)
+        return PostAuthor(
+            uid=user.uid,
+            display_name=user.display_name,
+            avatar_url=user.photo_url,
+            email=user.email,
+        )
+    except Exception:
+        return None
 
 
 def get_thumbnail_url(post) -> Optional[str]:
@@ -165,18 +189,20 @@ async def upload_image(
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post(
     post_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single post by ID (response matches client Post)."""
     post = await PostService.get_post_by_id(db, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return PostResponse.from_post(post)
+    return _enrich_post(post, request)
 
 
 @router.get("/{post_id}/status", response_model=PostStatusResponse)
 async def get_post_status(
     post_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Check processing status (for video posts)."""
@@ -186,14 +212,15 @@ async def get_post_status(
     return PostStatusResponse(
         post_id=post.id,
         status=post.status,
-        media_url=get_media_url(post),
-        thumbnail_url=get_thumbnail_url(post),
+        media_url=make_absolute_url(request, get_media_url(post)),
+        thumbnail_url=make_absolute_url(request, get_thumbnail_url(post)),
         error_message=post.error_message,
     )
 
 
 @router.get("", response_model=PostListResponse)
 async def list_posts(
+    request: Request,
     page: int = 1,
     page_size: int = 20,
     type: Optional[PostType] = Query(None, alias="type"),
@@ -221,11 +248,20 @@ async def list_posts(
     )
 
     return PostListResponse(
-        posts=[PostResponse.from_post(p) for p in posts],
+        posts=[_enrich_post(p, request) for p in posts],
         total=total,
         page=page,
         page_size=page_size,
     )
+
+
+def _enrich_post(post, request: Request) -> PostResponse:
+    """Build a PostResponse with embedded author info and absolute media URLs."""
+    resp = PostResponse.from_post(post)
+    resp.media_url = make_absolute_url(request, resp.media_url) or ""
+    resp.thumbnail_url = make_absolute_url(request, resp.thumbnail_url) or ""
+    resp.author = resolve_author(post.user_id)
+    return resp
 
 
 @router.delete("/{post_id}")
