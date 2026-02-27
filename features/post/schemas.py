@@ -14,6 +14,14 @@ class PostCreate(BaseModel):
 
 
 # --- Response schemas (camelCase for client) ---
+class PostAuthor(BaseModel):
+    """Embedded author info resolved from Firebase Auth"""
+    uid: str
+    display_name: Optional[str] = Field(None, serialization_alias="displayName")
+    avatar_url: Optional[str] = Field(None, serialization_alias="avatarUrl")
+    email: Optional[str] = None
+
+
 class PostResponse(BaseModel):
     """Post response matching client Post data class"""
     id: int
@@ -26,6 +34,7 @@ class PostResponse(BaseModel):
     like_count: int = Field(0, serialization_alias="likeCount")
     comment_count: int = Field(0, serialization_alias="commentCount")
     created_at: int = Field(..., serialization_alias="createdAt")  # milliseconds
+    author: Optional[PostAuthor] = None
 
     model_config = ConfigDict(from_attributes=True)
 
