@@ -25,5 +25,5 @@ class PostSocialState(BaseModel):
     save_count: int = Field(..., serialization_alias="saveCount")
     is_liked: bool = Field(..., serialization_alias="isLiked")
     is_saved: bool = Field(..., serialization_alias="isSaved")
-    is_share: bool = Field(..., serialization_alias="isShare")
+    is_shared: bool = Field(..., serialization_alias="isShared")
 

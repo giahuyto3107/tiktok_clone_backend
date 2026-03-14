@@ -23,7 +23,7 @@ async def share_post(
     uid = current_user["uid"]
     await ShareService.share_post(db, uid, post_id, target=target)
     share_count = await ShareService.get_share_count(db, post_id)
-    return PostShareResponse(post_id=post_id, share_count=share_count, is_share=True)
+    return PostShareResponse(post_id=post_id, share_count=share_count, is_shared=True)
 
 
 @router.delete("/posts/{post_id}/share", response_model=PostShareResponse)
@@ -36,5 +36,5 @@ async def unshare_post(
     uid = current_user["uid"]
     await ShareService.unshare_post(db, uid, post_id)
     share_count = await ShareService.get_share_count(db, post_id)
-    return PostShareResponse(post_id=post_id, share_count=share_count, is_share=False)
+    return PostShareResponse(post_id=post_id, share_count=share_count, is_shared=False)
 

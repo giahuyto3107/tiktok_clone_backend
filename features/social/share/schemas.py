@@ -6,5 +6,5 @@ class PostShareResponse(BaseModel):
 
     post_id: int = Field(..., serialization_alias="postId")
     share_count: int = Field(..., serialization_alias="shareCount")
-    is_share: bool = Field(..., serialization_alias="isShare")
+    is_shared: bool = Field(..., serialization_alias="isShared")
 
