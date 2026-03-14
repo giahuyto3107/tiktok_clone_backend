@@ -237,8 +237,10 @@ uploads/
 media/
 static/uploads/
 
-# Firebase
+# Firebase (service account keys – không commit key lên repo)
 firebase-service-account.json
+*-firebase-adminsdk-*.json
+*firebase*adminsdk*.json
 
 # Secrets & SSL Certificates
 secrets/
@@ -256,3 +258,10 @@ docker-compose.override.yml
 config.local.py
 settings.local.py
 
+# Cursor
+.cursorindexingignore
+
+# SpecStory (history / AI spec – chỉ local, không push)
+.specstory/
+# SpecStory explanation file
+.specstory/.what-is-this.md

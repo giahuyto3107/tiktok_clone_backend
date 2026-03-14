@@ -9,6 +9,8 @@ from database import init_db
 from core.firebase import init_firebase
 from features.post.router import router as post_router
 from features.user.router import router as user_router
+from features.social.router import router as social_router
+from features.inbox.router import router as inbox_router
 
 # Create upload directories (raw, compressed, images, thumbnails for video)
 UPLOAD_RAW_DIR = "uploads/raw"
@@ -54,10 +56,10 @@ app.add_middleware(
 
 # Mount static files for serving media (videos + images)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-# Include routers
+app.include_router(social_router, prefix="/api/v1/social", tags=["Social"])
 app.include_router(post_router, prefix="/api/v1/posts", tags=["Posts"])
 app.include_router(user_router, prefix="/api/v1/users", tags=["Users"])
+app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["Inbox"])
 
 
 @app.get("/api/v1")
