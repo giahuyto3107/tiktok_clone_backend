@@ -63,7 +63,7 @@ async def get_post_social_state(
     Các count được tính trực tiếp từ các bảng social (post_likes, comments, post_shares).
     """
     uid = current_user["uid"]
-    like_count, comment_count, share_count, save_count, is_liked, is_saved, is_share = (
+    like_count, comment_count, share_count, save_count, is_liked, is_saved, is_shared = (
         await ReactionService.get_post_social_state(
             db,
             uid,
@@ -79,6 +79,6 @@ async def get_post_social_state(
         save_count=save_count,
         is_liked=is_liked,
         is_saved=is_saved,
-        is_share=is_share,
+        is_shared=is_shared,
     )
 

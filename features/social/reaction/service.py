@@ -117,7 +117,7 @@ class ReactionService:
         user_id: str,
         post_id: int,
     ) -> tuple[int, int, int, int, bool, bool, bool]:
-        """Return (like_count, comment_count, share_count, save_count, is_liked, is_saved, is_share)."""
+        """Return (like_count, comment_count, share_count, save_count, is_liked, is_saved, is_shared)."""
         logging.getLogger(__name__).info(
             f"ReactionService.get_post_social_state user_id={user_id}, post_id={post_id}"
         )
@@ -127,7 +127,6 @@ class ReactionService:
         like_count_stmt = select(func.count(PostLike.post_id)).where(
             PostLike.post_id == post_id
         )
-        comment_count_stmt = select(func.count(Comment.id)).where()
         like_count = (await db.execute(like_count_stmt)).scalar_one()
 
         # Tổng số comment cho post
@@ -160,13 +159,19 @@ class ReactionService:
         is_liked = (await db.execute(like_check)).scalar_one_or_none() is not None
         is_saved = (await db.execute(save_check)).scalar_one_or_none() is not None
 
-        # Current user đã share post này chưa
+        # Current user đã share post này chưa (có record trong post_shares với user_id + post_id)
         share_check = select(PostShare.id).where(
             PostShare.user_id == user_id,
             PostShare.post_id == post_id,
         ).limit(1)
-        is_share = (await db.execute(share_check)).first() is not None
-
-        return like_count, comment_count, share_count, save_count, is_liked, is_saved, is_share
+        share_row = (await db.execute(share_check)).first()
+        is_shared = share_row is not None
+        if not is_shared and logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+            logging.getLogger(__name__).debug(
+                "is_shared = false: no row in post_shares for user_id=%r post_id=%s",
+                user_id,
+                post_id,
+            )
+        return like_count, comment_count, share_count, save_count, is_liked, is_saved, is_shared
 
 
