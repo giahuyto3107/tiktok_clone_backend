@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import MessageStatus, MessageType
+from .models import MessageReceipt, MessageStatus, MessageType, ReceiptStatus
 
 
 class MessageCreate(BaseModel):
@@ -21,6 +21,10 @@ class MessageResponse(BaseModel):
     type: MessageType
     status: MessageStatus
     image_uri: str | None = Field(default=None, serialization_alias="imageUri")
+    receipt_status: ReceiptStatus | None = Field(
+        default=None,
+        serialization_alias="receiptStatus",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

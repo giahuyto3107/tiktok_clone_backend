@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 from typing import Optional
 
@@ -14,10 +15,21 @@ from fastapi import (
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, update
 
 from core.auth import get_current_user
+from core.realtime.ws_manager import ws_manager
+from core.time_utils import to_epoch_ms_utc
 from database import get_db
-from .models import Chat, Message, MessageStatus, MessageType
+from .models import (
+    Chat,
+    ChatParticipant,
+    Message,
+    MessageReceipt,
+    MessageStatus,
+    MessageType,
+    ReceiptStatus,
+)
 from .schemas import (
     ChatListResponse,
     ChatSummary,
@@ -38,6 +50,19 @@ MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100 MB
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+IMAGE_CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+VIDEO_CONTENT_TYPE_TO_EXT = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+}
 
 os.makedirs(INBOX_IMAGE_DIR, exist_ok=True)
 os.makedirs(INBOX_VIDEO_DIR, exist_ok=True)
@@ -57,8 +82,96 @@ def make_absolute_media_url(request: Request, relative_path: str | None) -> str 
     return f"{base}{relative_path}"
 
 
+def _to_message_response(
+    request: Request,
+    message: Message,
+    receipt_status: ReceiptStatus | None = None,
+) -> MessageResponse:
+    """Serialize Message ORM -> API response with absolute media URL."""
+    return MessageResponse(
+        id=message.id,
+        content=message.content,
+        sender_id=message.sender_id,
+        timestamp=to_epoch_ms_utc(message.created_at),
+        type=message.type,
+        status=message.status,
+        image_uri=make_absolute_media_url(request, message.image_url),
+        receipt_status=receipt_status,
+    )
+
+
+def _ensure_not_self_chat(uid: str, other_uid: str) -> None:
+    if uid == other_uid:
+        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+
+
+def _ensure_chat_participant(chat: Chat | None, uid: str) -> None:
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if uid not in {chat.user1_id, chat.user2_id}:
+        raise HTTPException(status_code=403, detail="Not a participant of this chat")
+
+
+def _relative_media_url(media_type: MessageType, unique_name: str) -> str:
+    if media_type == MessageType.IMAGE:
+        return f"/uploads/inbox/images/{unique_name}"
+    return f"/uploads/inbox/videos/{unique_name}"
+
+
+def _normalize_upload_type(type_value: str | None) -> MessageType | None:
+    """
+    Normalize upload type from form data.
+    Accepts IMAGE/VIDEO (case-insensitive). Returns None if missing.
+    """
+    if type_value is None:
+        return None
+    normalized = type_value.strip().upper()
+    if not normalized:
+        return None
+    try:
+        parsed = MessageType(normalized)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid type. Use IMAGE or VIDEO for upload endpoint.",
+        )
+    if parsed not in {MessageType.IMAGE, MessageType.VIDEO}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported type for file upload. Use IMAGE or VIDEO.",
+        )
+    return parsed
+
+
+def _infer_media_type(ext: str, content_type: str) -> MessageType | None:
+    if ext in ALLOWED_IMAGE_EXTENSIONS:
+        return MessageType.IMAGE
+    if ext in ALLOWED_VIDEO_EXTENSIONS:
+        return MessageType.VIDEO
+    if content_type.startswith("image/"):
+        return MessageType.IMAGE
+    if content_type.startswith("video/"):
+        return MessageType.VIDEO
+    return None
+
+
+def _ensure_extension(ext: str, content_type: str, media_type: MessageType) -> str:
+    if ext:
+        return ext
+    if media_type == MessageType.IMAGE:
+        return IMAGE_CONTENT_TYPE_TO_EXT.get(
+            content_type,
+            mimetypes.guess_extension(content_type) or ".jpg",
+        )
+    return VIDEO_CONTENT_TYPE_TO_EXT.get(
+        content_type,
+        mimetypes.guess_extension(content_type) or ".mp4",
+    )
+
+
 @router.get("/chats", response_model=ChatListResponse)
 async def list_chats(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
     limit: int = Query(20, ge=1, le=100),
@@ -69,6 +182,22 @@ async def list_chats(
     chats = await InboxService.list_chats_for_user(db, uid, limit=limit, offset=offset)
 
     summaries: list[ChatSummary] = []
+    chat_ids = [c.id for c in chats]
+
+    # unreadCount per chat from message_receipts (DELIVERED but not SEEN)
+    unread_stmt = (
+        select(Message.chat_id, func.count(MessageReceipt.message_id))
+        .join(Message, Message.id == MessageReceipt.message_id)
+        .where(
+            Message.chat_id.in_(chat_ids),
+            MessageReceipt.user_id == uid,
+            MessageReceipt.status == ReceiptStatus.DELIVERED,
+        )
+        .group_by(Message.chat_id)
+    )
+    unread_res = await db.execute(unread_stmt)
+    unread_map: dict[int, int] = {row[0]: row[1] for row in unread_res.all()}
+
     for chat in chats:
         other = chat.user2_id if chat.user1_id == uid else chat.user1_id
 
@@ -76,14 +205,24 @@ async def list_chats(
         if chat.last_message_id:
             msg = await db.get(Message, chat.last_message_id)
             if msg:
-                last_msg = MessageResponse(
-                    id=msg.id,
-                    content=msg.content,
-                    sender_id=msg.sender_id,
-                    timestamp=int(msg.created_at.timestamp() * 1000),
-                    type=msg.type,
-                    status=msg.status,
-                    image_uri=msg.image_url,
+                # Hiển thị receiptStatus theo logic:
+                # - Nếu current user là sender => hiển thị receipt của recipient (other)
+                # - Nếu current user là recipient => hiển thị receipt của current user
+                receipt_user_id = other if msg.sender_id == uid else uid
+                receipt_stmt = (
+                    select(MessageReceipt.status)
+                    .where(
+                        MessageReceipt.user_id == receipt_user_id,
+                        MessageReceipt.message_id == msg.id,
+                    )
+                    .limit(1)
+                )
+                receipt_row = await db.execute(receipt_stmt)
+                receipt_status = receipt_row.scalar_one_or_none()
+                last_msg = _to_message_response(
+                    request,
+                    msg,
+                    receipt_status=receipt_status,
                 )
 
         summaries.append(
@@ -91,7 +230,7 @@ async def list_chats(
                 chat_id=chat.id,
                 other_user_id=other,
                 last_message=last_msg,
-                unread_count=0,  # TODO: tính bằng ChatParticipant nếu cần
+                unread_count=unread_map.get(chat.id, 0),
             )
         )
 
@@ -110,10 +249,7 @@ async def list_messages(
     """Danh sách message trong 1 chat."""
     uid = current_user["uid"]
     chat = await db.get(Chat, chat_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if uid not in {chat.user1_id, chat.user2_id}:
-        raise HTTPException(status_code=403, detail="Not a participant of this chat")
+    _ensure_chat_participant(chat, uid)
 
     msgs, total = await InboxService.list_messages_for_chat(
         db,
@@ -122,18 +258,61 @@ async def list_messages(
         offset=offset,
     )
 
-    items = [
-        MessageResponse(
-            id=m.id,
-            content=m.content,
-            sender_id=m.sender_id,
-            timestamp=int(m.created_at.timestamp() * 1000),
-            type=m.type,
-            status=m.status,
-            image_uri=make_absolute_media_url(request, m.image_url),
+    items = [_to_message_response(request, m) for m in msgs]
+
+    # Mark receipts as SEEN for current user for messages returned,
+    # and update last_read_message_id for chat_participants.
+    if msgs:
+        ids = [m.id for m in msgs]
+        other_uid = chat.user2_id if chat.user1_id == uid else chat.user1_id
+
+        # Update receipts
+        await db.execute(
+            update(MessageReceipt)
+            .where(
+                MessageReceipt.user_id == uid,
+                MessageReceipt.message_id.in_(ids),
+            )
+            .values(status=ReceiptStatus.SEEN)
         )
-        for m in msgs
-    ]
+        # Update last read message pointer
+        await db.execute(
+            update(ChatParticipant)
+            .where(ChatParticipant.chat_id == chat_id, ChatParticipant.user_id == uid)
+            .values(last_read_message_id=max(ids))
+        )
+        await db.commit()
+
+        # Build receiptStatus per message (trả đúng label cho sender/recipient):
+        # - Nếu message.sender_id == current user => trả receipt của recipient (other)
+        # - Ngược lại => trả receipt của current user
+        receipts_stmt = (
+            select(
+                MessageReceipt.message_id,
+                MessageReceipt.user_id,
+                MessageReceipt.status,
+            )
+            .where(
+                MessageReceipt.message_id.in_(ids),
+                MessageReceipt.user_id.in_({uid, other_uid}),
+            )
+        )
+        receipts_res = await db.execute(receipts_stmt)
+        receipt_map: dict[tuple[int, str], ReceiptStatus] = {
+            (row[0], row[1]): row[2] for row in receipts_res.all()
+        }
+
+        rebuilt: list[MessageResponse] = []
+        for m in msgs:
+            receipt_user_id = other_uid if m.sender_id == uid else uid
+            rebuilt.append(
+                _to_message_response(
+                    request,
+                    m,
+                    receipt_status=receipt_map.get((m.id, receipt_user_id)),
+                )
+            )
+        items = rebuilt
     return MessageListResponse(messages=items, total=total)
 
 
@@ -151,8 +330,7 @@ async def send_message(
 ):
     """Gửi message mới tới một user khác (tự tạo chat nếu chưa có)."""
     uid = current_user["uid"]
-    if uid == other_uid:
-        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+    _ensure_not_self_chat(uid, other_uid)
 
     chat = await InboxService.get_or_create_chat(db, uid, other_uid)
 
@@ -170,15 +348,32 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
 
-    return MessageResponse(
-        id=msg.id,
-        content=msg.content,
-        sender_id=msg.sender_id,
-        timestamp=int(msg.created_at.timestamp() * 1000),
-        type=msg.type,
-        status=msg.status,
-        image_uri=make_absolute_media_url(request, msg.image_url),
+    # Hiển thị receiptStatus theo logic label:
+    # - Nam gửi message => hiển thị receipt của recipient (other_uid)
+    receipt_stmt = (
+        select(MessageReceipt.status)
+        .where(
+            MessageReceipt.user_id == other_uid,
+            MessageReceipt.message_id == msg.id,
+        )
+        .limit(1)
     )
+    receipt_row = await db.execute(receipt_stmt)
+    recipient_receipt_status = receipt_row.scalar_one_or_none()
+    message_resp = _to_message_response(
+        request,
+        msg,
+        receipt_status=recipient_receipt_status,
+    )
+    await ws_manager.broadcast_chat(
+        chat.id,
+        {
+            "event": "message_created",
+            "chatId": chat.id,
+            "message": message_resp.model_dump(by_alias=True, mode="json"),
+        },
+    )
+    return message_resp
 
 
 @router.post(
@@ -190,7 +385,7 @@ async def send_message_with_media(
     other_uid: str,
     request: Request,
     file: UploadFile = File(...),
-    type: MessageType = Form(MessageType.IMAGE),
+    type: str | None = Form(None),
     content: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -202,76 +397,90 @@ async def send_message_with_media(
     - Tạo message với `imageUri` trỏ tới đường dẫn `/uploads/...`.
     """
     uid = current_user["uid"]
-    if uid == other_uid:
-        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+    _ensure_not_self_chat(uid, other_uid)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
+    raw_content_type = (file.content_type or "").lower()
     ext = os.path.splitext(file.filename)[1].lower()
 
-    if type == MessageType.IMAGE:
-        if ext not in ALLOWED_IMAGE_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File type not allowed for IMAGE. "
-                    f"Supported: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}"
-                ),
-            )
-        content_bytes = await file.read()
-        file_size = len(content_bytes)
-        if file_size > MAX_IMAGE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File too large. Maximum size for image: "
-                    f"{MAX_IMAGE_SIZE // (1024 * 1024)} MB"
-                ),
-            )
-        unique_name = f"{uid}_msg_{os.urandom(8).hex()}{ext}"
-        disk_path = os.path.normpath(os.path.join(INBOX_IMAGE_DIR, unique_name))
-    elif type == MessageType.VIDEO:
-        if ext not in ALLOWED_VIDEO_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File type not allowed for VIDEO. "
-                    f"Supported: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"
-                ),
-            )
-        content_bytes = await file.read()
-        file_size = len(content_bytes)
-        if file_size > MAX_VIDEO_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File too large. Maximum size for video: "
-                    f"{MAX_VIDEO_SIZE // (1024 * 1024)} MB"
-                ),
-            )
-        unique_name = f"{uid}_msg_{os.urandom(8).hex()}{ext}"
-        disk_path = os.path.normpath(os.path.join(INBOX_VIDEO_DIR, unique_name))
-    else:
+    declared_type = _normalize_upload_type(type)
+    inferred_type = _infer_media_type(ext, raw_content_type)
+    if declared_type and inferred_type and declared_type != inferred_type:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported type for file upload. Use IMAGE or VIDEO.",
+            detail=(
+                "Mismatched media type and file. "
+                "Please ensure `type` matches the uploaded file."
+            ),
         )
 
+    media_type = declared_type or inferred_type
+    if media_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot determine media type. "
+                "Provide `type` as IMAGE/VIDEO or use a supported file extension."
+            ),
+        )
+
+    ext = _ensure_extension(ext, raw_content_type, media_type)
     try:
+        content_bytes = await file.read()
+        file_size = len(content_bytes)
+
+        if media_type == MessageType.IMAGE:
+            if ext not in ALLOWED_IMAGE_EXTENSIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File type not allowed for IMAGE. "
+                        f"Supported: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}"
+                    ),
+                )
+            if file_size > MAX_IMAGE_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File too large. Maximum size for image: "
+                        f"{MAX_IMAGE_SIZE // (1024 * 1024)} MB"
+                    ),
+                )
+            unique_name = f"{uid}_msg_{os.urandom(8).hex()}{ext}"
+            disk_path = os.path.normpath(os.path.join(INBOX_IMAGE_DIR, unique_name))
+        else:
+            if ext not in ALLOWED_VIDEO_EXTENSIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File type not allowed for VIDEO. "
+                        f"Supported: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"
+                    ),
+                )
+            if file_size > MAX_VIDEO_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File too large. Maximum size for video: "
+                        f"{MAX_VIDEO_SIZE // (1024 * 1024)} MB"
+                    ),
+                )
+            unique_name = f"{uid}_msg_{os.urandom(8).hex()}{ext}"
+            disk_path = os.path.normpath(os.path.join(INBOX_VIDEO_DIR, unique_name))
+
         with open(disk_path, "wb") as f:
             f.write(content_bytes)
         logger.info("Saved inbox media file: %s (%d bytes)", disk_path, file_size)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to save inbox media file: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save media file")
 
     # Đường dẫn public tương đối (được phục vụ bởi StaticFiles ở `/uploads`)
-    relative_url = None
-    if type == MessageType.IMAGE:
-        relative_url = f"/uploads/inbox/images/{unique_name}"
-    elif type == MessageType.VIDEO:
-        relative_url = f"/uploads/inbox/videos/{unique_name}"
+    relative_url = _relative_media_url(media_type, unique_name)
 
     chat = await InboxService.get_or_create_chat(db, uid, other_uid)
 
@@ -281,20 +490,37 @@ async def send_message_with_media(
         sender_id=uid,
         content=content,
         image_url=relative_url,
-        type_=type,
+        type_=media_type,
     )
 
     msg.status = MessageStatus.SENT
     await db.commit()
     await db.refresh(msg)
 
-    return MessageResponse(
-        id=msg.id,
-        content=msg.content,
-        sender_id=msg.sender_id,
-        timestamp=int(msg.created_at.timestamp() * 1000),
-        type=msg.type,
-        status=msg.status,
-        image_uri=make_absolute_media_url(request, msg.image_url),
+    # Hiển thị receiptStatus theo logic label:
+    # - message do sender (current user) tạo => hiển thị receipt của recipient (other_uid)
+    receipt_stmt = (
+        select(MessageReceipt.status)
+        .where(
+            MessageReceipt.user_id == other_uid,
+            MessageReceipt.message_id == msg.id,
+        )
+        .limit(1)
     )
+    receipt_row = await db.execute(receipt_stmt)
+    recipient_receipt_status = receipt_row.scalar_one_or_none()
+    message_resp = _to_message_response(
+        request,
+        msg,
+        receipt_status=recipient_receipt_status,
+    )
+    await ws_manager.broadcast_chat(
+        chat.id,
+        {
+            "event": "message_created",
+            "chatId": chat.id,
+            "message": message_resp.model_dump(by_alias=True, mode="json"),
+        },
+    )
+    return message_resp
 
