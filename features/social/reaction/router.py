@@ -5,8 +5,15 @@ from core.auth import get_current_user
 from database import get_db
 from .schemas import PostLikeResponse, PostSaveResponse, PostSocialState
 from .service import ReactionService
+from core.realtime.ws_manager import ws_manager
+from ..notification.models import NotificationActionType
+from ..notification.service import NotificationService
 
 router = APIRouter(tags=["Social"])
+
+
+def _uid(current_user: dict) -> str:
+    return current_user["uid"]
 
 
 @router.post("/posts/{post_id}/like", response_model=PostLikeResponse)
@@ -15,8 +22,19 @@ async def like_post(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    uid = current_user["uid"]
-    await ReactionService.like_post(db, uid, post_id)
+    actor_uid = _uid(current_user)
+    created = await ReactionService.like_post(db, actor_uid, post_id)
+    if created:
+        await NotificationService.create_for_post_owner(
+            db,
+            from_user_id=actor_uid,
+            post_id=post_id,
+            action_type=NotificationActionType.LIKE,
+        )
+    await ws_manager.broadcast_post(
+        post_id,
+        {"event": "post_state_changed", "postId": post_id},
+    )
     return PostLikeResponse(post_id=post_id, is_liked=True)
 
 
@@ -26,8 +44,11 @@ async def unlike_post(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    uid = current_user["uid"]
-    await ReactionService.unlike_post(db, uid, post_id)
+    await ReactionService.unlike_post(db, _uid(current_user), post_id)
+    await ws_manager.broadcast_post(
+        post_id,
+        {"event": "post_state_changed", "postId": post_id},
+    )
     return PostLikeResponse(post_id=post_id, is_liked=False)
 
 
@@ -37,8 +58,12 @@ async def save_post(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    uid = current_user["uid"]
-    await ReactionService.save_post(db, uid, post_id)
+    actor_uid = _uid(current_user)
+    created = await ReactionService.save_post(db, actor_uid, post_id)
+    await ws_manager.broadcast_post(
+        post_id,
+        {"event": "post_state_changed", "postId": post_id},
+    )
     return PostSaveResponse(post_id=post_id, is_saved=True)
 
 
@@ -48,8 +73,11 @@ async def unsave_post(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    uid = current_user["uid"]
-    await ReactionService.unsave_post(db, uid, post_id)
+    await ReactionService.unsave_post(db, _uid(current_user), post_id)
+    await ws_manager.broadcast_post(
+        post_id,
+        {"event": "post_state_changed", "postId": post_id},
+    )
     return PostSaveResponse(post_id=post_id, is_saved=False)
 
 @router.get("/posts/{post_id}/state", response_model=PostSocialState)
@@ -62,7 +90,7 @@ async def get_post_social_state(
 
     Các count được tính trực tiếp từ các bảng social (post_likes, comments, post_shares).
     """
-    uid = current_user["uid"]
+    uid = _uid(current_user)
     like_count, comment_count, share_count, save_count, is_liked, is_saved, is_shared = (
         await ReactionService.get_post_social_state(
             db,

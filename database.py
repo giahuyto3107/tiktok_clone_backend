@@ -1,6 +1,7 @@
 # database.py - MySQL Async Connection
 import os
 from collections.abc import AsyncGenerator
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from dotenv import load_dotenv
@@ -51,3 +52,19 @@ async def init_db():
     """Initialize database tables"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_schema_updates)
+
+
+def _ensure_schema_updates(sync_conn) -> None:
+    """
+    Lightweight schema update for existing DBs.
+    - Add comments.image_url if missing (for image comments).
+    """
+    inspector = inspect(sync_conn)
+    tables = set(inspector.get_table_names())
+    if "comments" not in tables:
+        return
+
+    comment_columns = {col["name"] for col in inspector.get_columns("comments")}
+    if "image_url" not in comment_columns:
+        sync_conn.execute(text("ALTER TABLE comments ADD COLUMN image_url VARCHAR(512) NULL"))
