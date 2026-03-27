@@ -70,6 +70,41 @@ async def inbox_chat_ws(
             pass
 
 
+@router.websocket("/api/v1/ws/inbox/users/{uid}")
+async def inbox_user_ws(
+    websocket: WebSocket,
+    uid: str,
+    token: str | None = Query(
+        default=None,
+        description="Firebase ID token (optional; use Authorization header if possible)",
+    ),
+):
+    """
+    WS cho user-level inbox (đẩy event để FE refresh chat list/unread).
+    Rule: chỉ cho phép connect nếu token uid == {uid}.
+    """
+    await websocket.accept()
+    try:
+        token_uid = await _get_current_uid_from_ws(websocket, token)
+        if token_uid != uid:
+            await websocket.close(code=4403)
+            return
+
+        await ws_manager.connect_user(uid, websocket)
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            return
+    except HTTPException:
+        await websocket.close(code=4401)
+    finally:
+        try:
+            await ws_manager.disconnect_user(uid, websocket)
+        except Exception:
+            pass
+
+
 @router.websocket("/api/v1/ws/social/posts/{post_id}")
 async def social_post_ws(
     websocket: WebSocket,

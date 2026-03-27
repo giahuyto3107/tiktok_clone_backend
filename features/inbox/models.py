@@ -45,6 +45,7 @@ class Chat(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -100,6 +101,7 @@ class MessageReceipt(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -119,6 +121,7 @@ class ChatParticipant(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
