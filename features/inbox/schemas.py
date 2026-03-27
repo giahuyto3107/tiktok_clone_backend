@@ -50,3 +50,14 @@ class ChatListResponse(BaseModel):
     chats: list[ChatSummary]
     total: int
 
+
+class InboxContactResponse(BaseModel):
+    uid: str
+    username: str | None = Field(default=None, serialization_alias="username")
+    avatar_url: str | None = Field(default=None, serialization_alias="avatarUrl")
+
+
+class InboxContactListResponse(BaseModel):
+    users: list[InboxContactResponse]
+    total: int
+

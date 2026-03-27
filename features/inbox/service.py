@@ -3,6 +3,7 @@ from typing import Iterable, Tuple
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.time_utils import now_utc
 from .models import (
     Chat,
     ChatParticipant,
@@ -84,6 +85,7 @@ class InboxService:
         chat = await db.get(Chat, chat_id)
         if chat:
             chat.last_message_id = msg.id
+            chat.updated_at = now_utc()
             await db.commit()
 
             # Mark sender as SEEN (since they just sent),

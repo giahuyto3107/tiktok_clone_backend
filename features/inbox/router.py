@@ -15,7 +15,8 @@ from fastapi import (
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
+from firebase_admin import auth as firebase_auth
 
 from core.auth import get_current_user
 from core.realtime.ws_manager import ws_manager
@@ -33,6 +34,8 @@ from .models import (
 from .schemas import (
     ChatListResponse,
     ChatSummary,
+    InboxContactListResponse,
+    InboxContactResponse,
     MessageCreate,
     MessageListResponse,
     MessageResponse,
@@ -110,6 +113,29 @@ def _ensure_chat_participant(chat: Chat | None, uid: str) -> None:
         raise HTTPException(status_code=404, detail="Chat not found")
     if uid not in {chat.user1_id, chat.user2_id}:
         raise HTTPException(status_code=403, detail="Not a participant of this chat")
+
+
+def _resolve_profile(uid: str) -> InboxContactResponse | None:
+    """Resolve username/avatar from Firebase Auth."""
+    try:
+        user = firebase_auth.get_user(uid)
+        display_name = user.display_name
+        photo_url = user.photo_url
+        if (not display_name or not photo_url) and user.provider_data:
+            for provider in user.provider_data:
+                if not display_name and getattr(provider, "display_name", None):
+                    display_name = provider.display_name
+                if not photo_url and getattr(provider, "photo_url", None):
+                    photo_url = provider.photo_url
+                if display_name and photo_url:
+                    break
+        return InboxContactResponse(
+            uid=user.uid,
+            username=display_name or None,
+            avatar_url=photo_url or None,
+        )
+    except Exception:
+        return None
 
 
 def _relative_media_url(media_type: MessageType, unique_name: str) -> str:
@@ -235,6 +261,53 @@ async def list_chats(
         )
 
     return ChatListResponse(chats=summaries, total=len(summaries))
+
+
+@router.get("/contacts", response_model=InboxContactListResponse)
+async def list_inbox_contacts(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Trả về danh sách user đã từng nhắn tin (có ít nhất 1 message) với current user.
+    """
+    uid = current_user["uid"]
+
+    other_uid_expr = case(
+        (Chat.user1_id == uid, Chat.user2_id),
+        else_=Chat.user1_id,
+    )
+
+    base = (
+        select(
+            other_uid_expr.label("other_uid"),
+            func.max(Chat.updated_at).label("last_updated_at"),
+        )
+        .where((Chat.user1_id == uid) | (Chat.user2_id == uid))
+        .where(Chat.last_message_id.is_not(None))
+        .group_by(other_uid_expr)
+    )
+
+    total_stmt = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(total_stmt)).scalar_one()
+
+    stmt = (
+        base.order_by(func.max(Chat.updated_at).desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    res = await db.execute(stmt)
+    other_uids = [row[0] for row in res.all() if row[0]]
+
+    users: list[InboxContactResponse] = []
+    for other_uid in other_uids:
+        profile = _resolve_profile(other_uid)
+        if profile:
+            users.append(profile)
+
+    return InboxContactListResponse(users=users, total=int(total))
 
 
 @router.get("/chats/{chat_id}/messages", response_model=MessageListResponse)
@@ -371,6 +444,30 @@ async def send_message(
             "event": "message_created",
             "chatId": chat.id,
             "message": message_resp.model_dump(by_alias=True, mode="json"),
+        },
+    )
+    # user-level WS: chỉ đẩy event cho FE refresh chat list.
+    # Strict contract: user-level emits `inbox_message_created` (not `message_created`).
+    await ws_manager.broadcast_user(
+        uid,
+        {
+            "event": "inbox_message_created",
+            "data": {
+                "chatId": chat.id,
+                "otherUserId": other_uid,
+                "messageId": msg.id,
+            },
+        },
+    )
+    await ws_manager.broadcast_user(
+        other_uid,
+        {
+            "event": "inbox_message_created",
+            "data": {
+                "chatId": chat.id,
+                "otherUserId": uid,
+                "messageId": msg.id,
+            },
         },
     )
     return message_resp
@@ -520,6 +617,28 @@ async def send_message_with_media(
             "event": "message_created",
             "chatId": chat.id,
             "message": message_resp.model_dump(by_alias=True, mode="json"),
+        },
+    )
+    await ws_manager.broadcast_user(
+        uid,
+        {
+            "event": "inbox_message_created",
+            "data": {
+                "chatId": chat.id,
+                "otherUserId": other_uid,
+                "messageId": msg.id,
+            },
+        },
+    )
+    await ws_manager.broadcast_user(
+        other_uid,
+        {
+            "event": "inbox_message_created",
+            "data": {
+                "chatId": chat.id,
+                "otherUserId": uid,
+                "messageId": msg.id,
+            },
         },
     )
     return message_resp
