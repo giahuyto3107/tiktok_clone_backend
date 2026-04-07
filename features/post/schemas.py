@@ -2,6 +2,7 @@
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.time_utils import to_epoch_ms_utc
 from .models import PostType, PostStatus
 
 
@@ -47,7 +48,7 @@ class PostResponse(BaseModel):
             thumbnail_url=post.thumbnail_url or "",
             caption=post.caption or "",
             music_name=post.music_name or "Original Sound",
-            created_at=int(post.created_at.timestamp() * 1000) if post.created_at else 0,
+            created_at=to_epoch_ms_utc(post.created_at),
         )
 
 

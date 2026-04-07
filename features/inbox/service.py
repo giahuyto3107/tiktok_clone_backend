@@ -3,7 +3,16 @@ from typing import Iterable, Tuple
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Chat, Message, MessageStatus, MessageType
+from core.time_utils import now_utc
+from .models import (
+    Chat,
+    ChatParticipant,
+    Message,
+    MessageReceipt,
+    MessageStatus,
+    MessageType,
+    ReceiptStatus,
+)
 
 
 class InboxService:
@@ -27,13 +36,27 @@ class InboxService:
         )
         res = await db.execute(stmt)
         chat = res.scalar_one_or_none()
-        if chat:
-            return chat
+        if not chat:
+            chat = Chat(user1_id=user_a, user2_id=user_b)
+            db.add(chat)
+            await db.commit()
+            await db.refresh(chat)
 
-        chat = Chat(user1_id=user_a, user2_id=user_b)
-        db.add(chat)
-        await db.commit()
-        await db.refresh(chat)
+        # Ensure chat participants exist for both users
+        participants_needed = {chat.user1_id, chat.user2_id}
+        participants_stmt = select(ChatParticipant.user_id).where(
+            ChatParticipant.chat_id == chat.id,
+            ChatParticipant.user_id.in_(participants_needed),
+        )
+        participants_res = await db.execute(participants_stmt)
+        existing_user_ids = {row[0] for row in participants_res.all()}
+
+        missing_user_ids = participants_needed - existing_user_ids
+        for missing_uid in missing_user_ids:
+            db.add(ChatParticipant(chat_id=chat.id, user_id=missing_uid))
+        if missing_user_ids:
+            await db.commit()
+
         return chat
 
     @staticmethod
@@ -58,11 +81,32 @@ class InboxService:
         await db.commit()
         await db.refresh(msg)
 
-        # Update last_message_id trên Chat
+        # Update last_message_id trên Chat + create per-user receipts
         chat = await db.get(Chat, chat_id)
         if chat:
             chat.last_message_id = msg.id
+            chat.updated_at = now_utc()
             await db.commit()
+
+            # Mark sender as SEEN (since they just sent),
+            # recipient as DELIVERED.
+            recipient_id = chat.user2_id if chat.user1_id == sender_id else chat.user1_id
+            if recipient_id:
+                db.add(
+                    MessageReceipt(
+                        message_id=msg.id,
+                        user_id=sender_id,
+                        status=ReceiptStatus.SEEN,
+                    )
+                )
+                db.add(
+                    MessageReceipt(
+                        message_id=msg.id,
+                        user_id=recipient_id,
+                        status=ReceiptStatus.DELIVERED,
+                    )
+                )
+                await db.commit()
 
         return msg
 
@@ -96,7 +140,7 @@ class InboxService:
         stmt = (
             select(Message)
             .where(Message.chat_id == chat_id)
-            .order_by(Message.created_at.asc())
+            .order_by(Message.created_at.desc())
             .offset(offset)
             .limit(limit)
         )
