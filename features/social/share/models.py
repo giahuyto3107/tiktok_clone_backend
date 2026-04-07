@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from core.time_utils import now_utc
 from database import Base
 
 
@@ -16,8 +17,8 @@ class PostShare(Base):
     post_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     target: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
         nullable=False,
     )
 

@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import String, Text, Enum, DateTime, Integer, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
 
+from core.time_utils import now_utc
 from database import Base
 
 
@@ -40,8 +41,8 @@ class Post(Base):
 
     # Timestamps (client uses ms; we store datetime and can expose ms in API)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
         nullable=False
     )
 

@@ -4,6 +4,7 @@ import enum
 from sqlalchemy import BigInteger, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from core.time_utils import now_utc
 from database import Base
 
 
@@ -42,8 +43,9 @@ class Chat(Base):
     last_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -71,8 +73,8 @@ class Message(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
         nullable=False,
     )
 
@@ -97,8 +99,9 @@ class MessageReceipt(Base):
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
@@ -116,8 +119,9 @@ class ChatParticipant(Base):
         nullable=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
         nullable=False,
     )
 
