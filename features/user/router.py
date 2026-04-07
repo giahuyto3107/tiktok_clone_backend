@@ -79,3 +79,53 @@ async def get_firebase_user(uid: str):
             status_code=500,
             detail=f"Failed to retrieve user: {e}",
         )
+
+import os
+import uuid
+from fastapi import UploadFile, File
+
+UPLOAD_AVATARS_DIR = "uploads/images/avatars"
+os.makedirs(UPLOAD_AVATARS_DIR, exist_ok=True)
+ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+@router.post("/upload_avatar")
+async def upload_avatar(
+    file: UploadFile = File(...)
+):
+    """
+    Upload an avatar image to the local backend.
+    Returns the local URL to the uploaded avatar.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_AVATAR_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Supported: {', '.join(ALLOWED_AVATAR_EXTENSIONS)}",
+        )
+
+    # Read content to check size (e.g. limit to 5MB)
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Max 5MB.")
+
+    unique_filename = f"avatar_{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(UPLOAD_AVATARS_DIR, unique_filename)
+
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+        logger.info(f"Saved avatar: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to save avatar file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save avatar image")
+
+    # The backend is serving /uploads folder using StaticFiles
+    avatar_url = f"/uploads/images/avatars/{unique_filename}"
+    
+    return {
+        "status": "success",
+        "avatarUrl": avatar_url
+    }
