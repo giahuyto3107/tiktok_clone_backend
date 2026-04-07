@@ -95,3 +95,43 @@ class AdminPostListResponse(BaseModel):
     page: int
     limit: int
     total_pages: int
+
+# Chi tiết đầy đủ của một bài post (dùng cho GET /admin/posts/{id})
+class AdminPostDetail(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    caption: str
+    type: str           # VIDEO hoặc IMAGE
+    status: str         # PROCESSING / READY / FAILED
+    thumbnail_url: str
+    media_url: str
+    music_name: str
+    like_count: int
+    comment_count: int
+    duration: Optional[int] = None      # giây (chỉ có với video)
+    file_size: Optional[int] = None     # bytes
+    original_filename: Optional[str] = None
+    error_message: Optional[str] = None
+    date: str
+
+    class Config:
+        from_attributes = True
+
+# Body cho PUT /admin/posts/{id} — Admin cập nhật thông tin bài post
+# Các field đều Optional: chỉ field có giá trị mới được ghi vào DB
+class AdminUpdatePostRequest(BaseModel):
+    caption: Optional[str] = None
+    status: Optional[str] = None        # PROCESSING / READY / FAILED
+    music_name: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    media_url: Optional[str] = None
+
+# Body cho POST /admin/posts/create — Admin tạo post mới từ URL (không upload file)
+class AdminCreatePostRequest(BaseModel):
+    user_id: str
+    caption: Optional[str] = ""
+    type: str = "VIDEO"                 # VIDEO hoặc IMAGE
+    media_url: str
+    thumbnail_url: Optional[str] = ""
+    music_name: Optional[str] = "Original Sound"

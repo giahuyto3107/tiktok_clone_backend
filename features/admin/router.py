@@ -4,28 +4,33 @@
 # Router này được mount tại /api/v1/admin/ trong main.py.
 #
 # Danh sách endpoint:
-#   GET    /dashboard/stats          → Số liệu tổng quan Dashboard
-#   GET    /users                    → Danh sách user có phân trang
-#   PUT    /users/{id}/status        → Ban / verify user
-#   POST   /users                    → Tạo user mới từ Admin panel
-#   PUT    /users/{id}/profile       → Chỉnh sửa thông tin profile user
-#   GET    /posts                    → Danh sách bài post có phân trang
-#   DELETE /posts/{id}               → Xóa bài post
+#   GET    /dashboard/stats              → Số liệu tổng quan Dashboard
+#   GET    /users                        → Danh sách user có phân trang
+#   PUT    /users/{id}/status            → Ban / verify user
+#   POST   /users                        → Tạo user mới từ Admin panel
+#   PUT    /users/{id}/profile           → Chỉnh sửa thông tin profile user
+#   GET    /posts                        → Danh sách bài post có phân trang
+#   GET    /posts/{id}                   → Chi tiết một bài post
+#   POST   /posts/create                 → Tạo bài post mới từ Admin (URL-based)
+#   PUT    /posts/{id}                   → Cập nhật caption / status / music_name
+#   DELETE /posts/{id}                   → Xóa bài post
 # ─────────────────────────────────────────────────────────────────────────────
 import logging
 import math
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from datetime import datetime
 
 from database import get_db
 from features.user.models import User, UserStats
 from features.user.repository import UserRepository
-from features.post.models import Post, PostType
+from features.post.models import Post, PostType, PostStatus
 from .schemas import (
     AdminDashboardStats, AdminUserListResponse, AdminUserItem,
     AdminUserUpdateStatusRequest, AdminCreateUserRequest, AdminUpdateUserRequest,
-    AdminPostItem, AdminPostListResponse
+    AdminPostItem, AdminPostListResponse,
+    AdminPostDetail, AdminUpdatePostRequest, AdminCreatePostRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,27 @@ def _format_number(n: int) -> str:
     elif n >= 1_000:
         return f"{n/1_000:.1f}K".replace(".0K", "K")
     return str(n)
+
+def _post_to_item(post: Post, user: User | None, index: int, page: int, limit: int) -> AdminPostItem:
+    """Helper: convert Post ORM + User ORM → AdminPostItem."""
+    return AdminPostItem(
+        id=str(post.id),
+        stt=f"{(page - 1) * limit + index + 1:02d}",
+        user_id=str(post.user_id),
+        username=f"@{user.username}" if user and user.username else "@unknown",
+        caption=post.caption or "",
+        type=post.type.value,
+        status=post.status.value,
+        thumbnail_url=post.thumbnail_url or "",
+        media_url=post.media_url or "",
+        like_count=post.like_count,
+        comment_count=post.comment_count,
+        date=post.created_at.strftime("%d/%m/%Y"),
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dashboard
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard/stats", response_model=AdminDashboardStats)
 async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
@@ -66,6 +92,10 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch dashboard stats")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# User Management
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/users", response_model=AdminUserListResponse)
 async def get_admin_users(
@@ -226,7 +256,11 @@ async def update_admin_user_profile(
         raise HTTPException(status_code=500, detail="Could not update user profile")
 
 
-# ── Content Management endpoints ────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Content Management endpoints
+# NOTE: /posts/create phải đặt TRƯỚC /posts/{post_id} để FastAPI
+#       không nhầm "create" là một integer post_id.
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/posts", response_model=AdminPostListResponse)
 async def get_admin_posts(
@@ -254,24 +288,10 @@ async def get_admin_posts(
         result = await db.execute(rows_stmt)
         rows = result.all()
 
-        items = []
-        for i, row in enumerate(rows):
-            post = row[0]
-            user = row[1]
-            items.append(AdminPostItem(
-                id=str(post.id),
-                stt=f"{(page - 1) * limit + i + 1:02d}",
-                user_id=str(post.user_id),
-                username=f"@{user.username}" if user and user.username else "@unknown",
-                caption=post.caption or "",
-                type=post.type.value,
-                status=post.status.value,
-                thumbnail_url=post.thumbnail_url or "",
-                media_url=post.media_url or "",
-                like_count=post.like_count,
-                comment_count=post.comment_count,
-                date=post.created_at.strftime("%d/%m/%Y")
-            ))
+        items = [
+            _post_to_item(row[0], row[1], i, page, limit)
+            for i, row in enumerate(rows)
+        ]
 
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
         return AdminPostListResponse(
@@ -284,6 +304,167 @@ async def get_admin_posts(
     except Exception as e:
         logger.error(f"Error fetching posts: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch posts")
+
+
+@router.post("/posts/create", response_model=AdminPostItem, status_code=201)
+async def create_admin_post(
+    request: AdminCreatePostRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Tạo bài post mới trực tiếp từ Admin panel.
+    Dùng khi media đã có sẵn URL (không cần upload file).
+    """
+    try:
+        # Validate type
+        try:
+            post_type = PostType(request.type.upper())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid type '{request.type}'. Use VIDEO or IMAGE.")
+
+        # Verify user exists
+        user_stmt = select(User).where(User.id == request.user_id)
+        result = await db.execute(user_stmt)
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User '{request.user_id}' not found")
+
+        # Create post
+        new_post = Post(
+            user_id=request.user_id,
+            caption=request.caption or "",
+            type=post_type,
+            status=PostStatus.READY,
+            media_url=request.media_url,
+            thumbnail_url=request.thumbnail_url or "",
+            music_name=request.music_name or "Original Sound",
+            like_count=0,
+            comment_count=0,
+            created_at=datetime.utcnow(),
+        )
+        db.add(new_post)
+        await db.commit()
+        await db.refresh(new_post)
+
+        return AdminPostItem(
+            id=str(new_post.id),
+            stt="--",
+            user_id=str(new_post.user_id),
+            username=f"@{user.username}" if user.username else "@unknown",
+            caption=new_post.caption or "",
+            type=new_post.type.value,
+            status=new_post.status.value,
+            thumbnail_url=new_post.thumbnail_url or "",
+            media_url=new_post.media_url or "",
+            like_count=new_post.like_count,
+            comment_count=new_post.comment_count,
+            date=new_post.created_at.strftime("%d/%m/%Y"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating post: {e}")
+        raise HTTPException(status_code=500, detail="Could not create post")
+
+
+@router.get("/posts/{post_id}", response_model=AdminPostDetail)
+async def get_admin_post_detail(
+    post_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Lấy thông tin chi tiết đầy đủ của một bài post."""
+    try:
+        stmt = select(Post, User).join(User, Post.user_id == User.id, isouter=True).where(Post.id == post_id)
+        result = await db.execute(stmt)
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        post, user = row[0], row[1]
+        return AdminPostDetail(
+            id=str(post.id),
+            user_id=str(post.user_id),
+            username=f"@{user.username}" if user and user.username else "@unknown",
+            caption=post.caption or "",
+            type=post.type.value,
+            status=post.status.value,
+            thumbnail_url=post.thumbnail_url or "",
+            media_url=post.media_url or "",
+            music_name=post.music_name or "Original Sound",
+            like_count=post.like_count,
+            comment_count=post.comment_count,
+            duration=post.duration,
+            file_size=post.file_size,
+            original_filename=post.original_filename,
+            error_message=post.error_message,
+            date=post.created_at.strftime("%d/%m/%Y"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching post detail {post_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not fetch post detail")
+
+
+@router.put("/posts/{post_id}", response_model=AdminPostItem)
+async def update_admin_post(
+    post_id: int,
+    request: AdminUpdatePostRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cập nhật thông tin bài post từ Admin panel.
+    Chỉ các field được truyền (không None) mới được ghi lại.
+    """
+    try:
+        stmt = select(Post, User).join(User, Post.user_id == User.id, isouter=True).where(Post.id == post_id)
+        result = await db.execute(stmt)
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        post, user = row[0], row[1]
+
+        # Apply updates (only provided fields)
+        if request.caption is not None:
+            post.caption = request.caption
+        if request.music_name is not None:
+            post.music_name = request.music_name
+        if request.thumbnail_url is not None:
+            post.thumbnail_url = request.thumbnail_url
+        if request.media_url is not None:
+            post.media_url = request.media_url
+        if request.status is not None:
+            try:
+                post.status = PostStatus(request.status.upper())
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status '{request.status}'. Use PROCESSING, READY, or FAILED."
+                )
+
+        await db.commit()
+        await db.refresh(post)
+
+        return AdminPostItem(
+            id=str(post.id),
+            stt="--",
+            user_id=str(post.user_id),
+            username=f"@{user.username}" if user and user.username else "@unknown",
+            caption=post.caption or "",
+            type=post.type.value,
+            status=post.status.value,
+            thumbnail_url=post.thumbnail_url or "",
+            media_url=post.media_url or "",
+            like_count=post.like_count,
+            comment_count=post.comment_count,
+            date=post.created_at.strftime("%d/%m/%Y"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating post {post_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not update post")
 
 
 @router.delete("/posts/{post_id}", status_code=200)
