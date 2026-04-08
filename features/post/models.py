@@ -1,7 +1,7 @@
 # features/post/models.py - SQLAlchemy Post Model (shared for video & image)
 import enum
 from datetime import datetime
-from sqlalchemy import String, Text, Enum, DateTime, Integer, BigInteger
+from sqlalchemy import String, Text, Enum, DateTime, Integer, BigInteger, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.time_utils import now_utc
@@ -63,3 +63,14 @@ class Post(Base):
 
     def __repr__(self) -> str:
         return f"<Post(id={self.id}, type={self.type}, status={self.status})>"
+
+
+Index("ix_posts_created_at", Post.created_at)
+Index("ix_posts_user_id_created_at", Post.user_id, Post.created_at)
+Index("ix_posts_type_status_created_at", Post.type, Post.status, Post.created_at)
+Index(
+    "ft_posts_caption_music",
+    Post.caption,
+    Post.music_name,
+    mysql_prefix="FULLTEXT",
+)

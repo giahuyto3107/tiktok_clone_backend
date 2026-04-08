@@ -7,9 +7,10 @@ import shutil
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from .models import Post, PostType, PostStatus
+from features.user.models import UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,69 @@ class PostService:
             count_query = count_query.where(Post.status == status)
         total_result = await db.execute(count_query)
         total = total_result.scalar()
+
+        query = query.order_by(Post.created_at.desc()).offset(skip).limit(limit)
+        result = await db.execute(query)
+        posts = result.scalars().all()
+        return list(posts), total
+
+    @staticmethod
+    def _escape_like_pattern(raw: str) -> str:
+        """Escape % and _ for SQL LIKE / ILIKE."""
+        return (
+            raw.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+
+    @staticmethod
+    async def search_posts(
+        db: AsyncSession,
+        search_query: str,
+        skip: int = 0,
+        limit: int = 40,
+        post_type: PostType | None = None,
+    ) -> tuple[list[Post], int]:
+        """
+        Search posts by caption/music and also by author (cached `user_profiles`).
+
+        This is used by the Search feature. We intentionally rely on the `user_profiles`
+        cache instead of Firebase lookups for matching/filtering.
+        """
+        q = (search_query or "").strip()
+        if not q:
+            return [], 0
+
+        pattern = f"%{PostService._escape_like_pattern(q)}%"
+        text_match_posts = or_(
+            Post.caption.ilike(pattern, escape="\\"),
+            Post.music_name.ilike(pattern, escape="\\"),
+        )
+        text_match_author = or_(
+            UserProfile.username.ilike(pattern, escape="\\"),
+            UserProfile.email.ilike(pattern, escape="\\"),
+            UserProfile.uid.ilike(pattern, escape="\\"),
+        )
+        ready_or_image = or_(
+            Post.type == PostType.IMAGE,
+            Post.status == PostStatus.READY,
+        )
+        filters = (text_match_posts | text_match_author) & ready_or_image
+        if post_type is not None:
+            filters = filters & (Post.type == post_type)
+
+        # Outer join so posts still appear even if the profile cache doesn't exist yet.
+        base = select(Post).outerjoin(UserProfile, UserProfile.uid == Post.user_id)
+        query = base.where(filters)
+        count_query = (
+            select(func.count(Post.id))
+            .select_from(Post)
+            .outerjoin(UserProfile, UserProfile.uid == Post.user_id)
+            .where(filters)
+        )
+
+        total_result = await db.execute(count_query)
+        total = int(total_result.scalar() or 0)
 
         query = query.order_by(Post.created_at.desc()).offset(skip).limit(limit)
         result = await db.execute(query)

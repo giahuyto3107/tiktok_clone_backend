@@ -50,6 +50,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db():
     """Initialize database tables"""
+    # Ensure all model modules are imported so Base.metadata is fully populated.
+    # Routers/services may not import every model module (e.g. user profile cache).
+    from features.post import models as _post_models  # noqa: F401
+    from features.inbox import models as _inbox_models  # noqa: F401
+    from features.social.follow import models as _follow_models  # noqa: F401
+    from features.social.follow_notification import models as _follow_notif_models  # noqa: F401
+    from features.social.comment import models as _comment_models  # noqa: F401
+    from features.social.reaction import models as _reaction_models  # noqa: F401
+    from features.social.notification import models as _notif_models  # noqa: F401
+    from features.social.share import models as _share_models  # noqa: F401
+    from features.user import models as _user_models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_schema_updates)
