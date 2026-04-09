@@ -33,13 +33,13 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     # Startup: Initialize database tables
     await init_db()
-    print("✅ Database initialized")
+    print("[OK] Database initialized")
 
     # Startup: Initialize Firebase Admin SDK
     init_firebase()
     yield
     # Shutdown: Cleanup if needed
-    print("👋 Application shutting down")
+    print("[INFO] Application shutting down")
 
 
 app = FastAPI(
@@ -94,7 +94,7 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    print("🌐 Starting server with HTTP")
+    print("[INFO] Starting server with HTTP")
     print("   Access at: http://YOUR_WIFI_IP:8000")
     print("   Note: Configure Android app to allow cleartext HTTP (see docs/ANDROID_CLEARTEXT_SETUP.md)")
     print()
