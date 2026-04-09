@@ -105,7 +105,6 @@ async def upload_avatar(
             status_code=400,
             detail=f"File type not allowed. Supported: {', '.join(ALLOWED_AVATAR_EXTENSIONS)}",
         )
-
     # Read content to check size (e.g. limit to 5MB)
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -129,3 +128,4 @@ async def upload_avatar(
         "status": "success",
         "avatarUrl": avatar_url
     }
+
