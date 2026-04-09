@@ -1,46 +1,54 @@
-from datetime import datetime
+# features/user/models.py - SQLAlchemy User Models
+import uuid
+from datetime import datetime, date
+from sqlalchemy import String, Text, Boolean, DateTime, Date, Integer, BigInteger, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.mysql import CHAR
 
-from sqlalchemy import DateTime, String, Text, Index
-from sqlalchemy.orm import Mapped, mapped_column
-
-from core.time_utils import now_utc
 from database import Base
 
 
-class UserProfile(Base):
-    """
-    Lightweight user profile cache for fast search / display.
+class User(Base):
+    """User model storing data not kept in Firebase"""
+    __tablename__ = "users"
 
-    Auth source of truth remains Firebase; this table is a denormalized cache to avoid
-    scanning Firebase users for every search request.
-    """
+    # Using CHAR(36) for UUID in MySQL
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    firebase_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    
+    full_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    phone_number: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=True)
+    
+    date_of_birth: Mapped[date] = mapped_column(Date, nullable=True)
+    bio: Mapped[str] = mapped_column(Text, nullable=True)
+    avatar_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
-    __tablename__ = "user_profiles"
+    # Relationships
+    stats: Mapped["UserStats"] = relationship("UserStats", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
-    uid: Mapped[str] = mapped_column(String(255), primary_key=True)
-    username: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    avatar: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=now_utc,
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=now_utc,
-        onupdate=now_utc,
-        nullable=False,
-    )
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username={self.username}, firebase_uid={self.firebase_uid})>"
 
 
-Index("ix_user_profiles_username", UserProfile.username)
-Index("ix_user_profiles_email", UserProfile.email)
-Index(
-    "ft_user_profiles_username_email",
-    UserProfile.username,
-    UserProfile.email,
-    mysql_prefix="FULLTEXT",
-)
+class UserStats(Base):
+    """User statistics model (followers, following, likes)"""
+    __tablename__ = "user_stats"
 
+    user_id: Mapped[str] = mapped_column(CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    
+    followers_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    following_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    likes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="stats")
+
+    def __repr__(self) -> str:
+        return f"<UserStats(user_id={self.user_id}, followers={self.followers_count})>"
