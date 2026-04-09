@@ -9,22 +9,38 @@ _FIREBASE_CREDENTIALS_PATH = os.getenv(
     "firebase-service-account.json",
 )
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "y", "on"}
 
-def init_firebase():
+
+def init_firebase() -> bool:
     """
     Initialize the Firebase Admin SDK using a service account key.
     Call this once at application startup (e.g. in the FastAPI lifespan).
     """
     if firebase_admin._apps:
         # Already initialized — skip
-        return
+        return True
 
     if not os.path.isfile(_FIREBASE_CREDENTIALS_PATH):
-        raise FileNotFoundError(
-            f"Firebase service account key not found at: {_FIREBASE_CREDENTIALS_PATH}\n"
-            "Download it from Firebase Console → Project Settings → Service Accounts."
+        # Default behavior: don't crash local dev if the key isn't present.
+        # Set FIREBASE_REQUIRED=true to enforce this check (recommended for prod).
+        if _env_flag("FIREBASE_REQUIRED", default=False):
+            raise FileNotFoundError(
+                f"Firebase service account key not found at: {_FIREBASE_CREDENTIALS_PATH}\n"
+                "Download it from Firebase Console → Project Settings → Service Accounts."
+            )
+        print(
+            f"⚠️  Firebase not initialized (missing service account at: {_FIREBASE_CREDENTIALS_PATH}). "
+            "Set FIREBASE_SERVICE_ACCOUNT_KEY or provide the JSON file; "
+            "or set FIREBASE_REQUIRED=true to fail fast."
         )
+        return False
 
     cred = credentials.Certificate(_FIREBASE_CREDENTIALS_PATH)
     firebase_admin.initialize_app(cred)
-    print("✅ Firebase Admin SDK initialized")
+    print("[OK] Firebase Admin SDK initialized")
+    return True

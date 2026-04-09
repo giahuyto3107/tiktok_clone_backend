@@ -52,3 +52,24 @@ class UserStats(Base):
 
     def __repr__(self) -> str:
         return f"<UserStats(user_id={self.user_id}, followers={self.followers_count})>"
+
+
+class UserProfile(Base):
+    """
+    Lightweight profile cache keyed by Firebase UID.
+
+    This table is intentionally minimal and is used for search/join operations
+    without requiring Firebase lookups.
+    """
+
+    __tablename__ = "user_profiles"
+
+    uid: Mapped[str] = mapped_column(String(128), primary_key=True)
+    username: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), index=True, nullable=True)
+    avatar: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
