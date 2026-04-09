@@ -13,6 +13,8 @@ from features.social.router import router as social_router
 from features.inbox.router import router as inbox_router
 from features.admin.router import router as admin_router
 from features.realtime.router import router as realtime_router
+from features.search.router import router as search_router
+from features.search.router_frontend import router as search_frontend_router
 
 # Create upload directories (raw, compressed, images, thumbnails for video)
 UPLOAD_RAW_DIR = "uploads/raw"
@@ -64,6 +66,8 @@ app.include_router(user_router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["Inbox"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
 app.include_router(realtime_router)
+app.include_router(search_router, prefix="/api/v1/search", tags=["Search"])
+app.include_router(search_frontend_router, prefix="/search", tags=["Search (Frontend)"])
 
 
 @app.get("/api/v1")

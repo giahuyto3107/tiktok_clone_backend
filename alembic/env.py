@@ -14,7 +14,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import Base, DATABASE_URL
 
 # Import all models for autogenerate support
-from features.post.models import Post
+from features.post.models import Post  # noqa: F401
+from features.inbox.models import Chat, Message, MessageReceipt, ChatParticipant  # noqa: F401
+from features.social.follow.models import Follow  # noqa: F401
+from features.social.follow_notification.models import FollowNotification, FollowNotificationReceipt  # noqa: F401
+from features.social.comment.models import Comment, CommentLike  # noqa: F401
+from features.social.reaction.models import PostLike, PostSave  # noqa: F401
+from features.social.notification.models import SocialNotification, SocialNotificationReceipt  # noqa: F401
+from features.social.share.models import PostShare  # noqa: F401
+from features.user.models import UserProfile  # noqa: F401
 
 
 # this is the Alembic Config object, which provides
