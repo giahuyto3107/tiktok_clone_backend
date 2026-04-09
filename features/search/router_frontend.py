@@ -189,25 +189,27 @@ async def search_all_frontend(
             if url:
                 images.append(url)
 
+    # --- Build user list for "Người dùng" tab ---
     user_items: list[FrontendUserItem] = []
+
+    # 1) Users that explicitly match the query (search bar "user search")
     cached = await _search_users_db(db, q, skip=0, limit=30)
     if cached:
-        # cached is SearchUserItem; re-query profiles for aggregates
+        cached_uids = [u.uid for u in cached]
         profs_result = await db.execute(
-            select(UserProfile).where(UserProfile.uid.in_([u.uid for u in cached]))
+            select(UserProfile).where(UserProfile.uid.in_(cached_uids))
         )
         profs = profs_result.scalars().all()
-        user_items = await _users_to_frontend_items(db, list(profs))
+        user_items.extend(await _users_to_frontend_items(db, list(profs)))
     else:
         fb = _filter_users_by_query_firebase(q, max_results=30)
         try:
             await _upsert_user_profiles(db, fb)
         except Exception as e:
             logger.warning("User profile cache upsert failed: %s", e)
-        # build minimal user items from firebase results
-        user_items = [
+        user_items.extend(
             FrontendUserItem(
-                id=i + 1,
+                id=len(user_items) + i + 1,
                 display_name=u.username,
                 handle=_safe_handle(u.username, u.uid[:8]),
                 avatar=u.avatar,
@@ -216,7 +218,26 @@ async def search_all_frontend(
                 is_followed=False,
             )
             for i, u in enumerate(fb)
-        ]
+        )
+
+    # 2) Always include authors of the matched posts (e.g. "minhpro" from review video)
+    author_uids = list({p.user_id for p in posts if getattr(p, "user_id", None)})
+    remaining_uids = [uid for uid in author_uids if uid not in {u.handle.lstrip("@") for u in user_items}]
+    if remaining_uids:
+        author_profs_result = await db.execute(
+            select(UserProfile).where(UserProfile.uid.in_(remaining_uids))
+        )
+        author_profs = author_profs_result.scalars().all()
+        author_items = await _users_to_frontend_items(db, list(author_profs))
+
+        # Merge, preserving existing IDs and de-duplicating by handle
+        existing_handles = {u.handle for u in user_items}
+        for ai in author_items:
+            if ai.handle in existing_handles:
+                continue
+            ai.id = len(user_items) + 1
+            user_items.append(ai)
+            existing_handles.add(ai.handle)
 
     return FrontendSearchResponse(
         videos=videos,
