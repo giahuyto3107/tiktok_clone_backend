@@ -175,12 +175,19 @@ class PostService:
             filters = filters & (Post.type == post_type)
 
         # Outer join so posts still appear even if the profile cache doesn't exist yet.
-        base = select(Post).outerjoin(UserProfile, UserProfile.uid == Post.user_id)
+        # Explicit collation avoids MySQL "Illegal mix of collations" on legacy schemas.
+        base = select(Post).outerjoin(
+            UserProfile,
+            UserProfile.uid.collate("utf8mb4_unicode_ci") == Post.user_id.collate("utf8mb4_unicode_ci"),
+        )
         query = base.where(filters)
         count_query = (
             select(func.count(Post.id))
             .select_from(Post)
-            .outerjoin(UserProfile, UserProfile.uid == Post.user_id)
+            .outerjoin(
+                UserProfile,
+                UserProfile.uid.collate("utf8mb4_unicode_ci") == Post.user_id.collate("utf8mb4_unicode_ci"),
+            )
             .where(filters)
         )
 

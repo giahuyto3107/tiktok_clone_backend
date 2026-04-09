@@ -121,7 +121,7 @@ async def list_comments_for_post(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[dict] = Depends(get_optional_user),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(1000, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """List comments for a given post."""

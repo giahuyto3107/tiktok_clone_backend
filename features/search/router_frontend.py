@@ -11,7 +11,7 @@ from features.post.models import Post, PostType
 from features.post.router import _enrich_post, resolve_author
 from features.post.service import PostService
 from features.social.follow.models import Follow
-from features.user.models import UserProfile
+from features.user.models import User, UserProfile
 from .router import _search_users_db, _filter_users_by_query_firebase, _upsert_user_profiles
 from .frontend_schemas import (
     DiscoverItem,
@@ -58,7 +58,19 @@ async def _users_to_frontend_items(
     if not users:
         return []
 
-    uids = [u.uid for u in users]
+    raw_uids = [u.uid for u in users]
+    uid_map: dict[str, str] = {}
+    if raw_uids:
+        normalized_result = await db.execute(
+            select(User.id, User.firebase_uid).where(
+                (User.id.in_(raw_uids)) | (User.firebase_uid.in_(raw_uids))
+            )
+        )
+        for user_id, firebase_uid in normalized_result.all():
+            uid_map[user_id] = firebase_uid
+            uid_map[firebase_uid] = firebase_uid
+
+    uids = [uid_map.get(uid, uid) for uid in raw_uids]
 
     follower_rows = await db.execute(
         select(Follow.followee_id, func.count(Follow.follower_id))
@@ -76,15 +88,17 @@ async def _users_to_frontend_items(
 
     out: list[FrontendUserItem] = []
     for idx, u in enumerate(users, start=1):
-        display = u.username or u.email or u.uid[:8]
+        normalized_uid = uid_map.get(u.uid, u.uid)
+        display = u.username or u.email or normalized_uid[:8]
         out.append(
             FrontendUserItem(
                 id=idx,
+                uid=normalized_uid,
                 display_name=display,
-                handle=_safe_handle(display, u.uid[:8]),
+                handle=_safe_handle(display, normalized_uid[:8]),
                 avatar=u.avatar or "",
-                follower_count=follower_map.get(u.uid, 0),
-                total_likes=likes_map.get(u.uid, 0),
+                follower_count=follower_map.get(normalized_uid, 0),
+                total_likes=likes_map.get(normalized_uid, 0),
                 is_followed=False,
             )
         )
@@ -210,6 +224,7 @@ async def search_all_frontend(
         user_items.extend(
             FrontendUserItem(
                 id=len(user_items) + i + 1,
+                uid=u.uid,
                 display_name=u.username,
                 handle=_safe_handle(u.username, u.uid[:8]),
                 avatar=u.avatar,
@@ -320,6 +335,7 @@ async def search_users_frontend(
     return [
         FrontendUserItem(
             id=i + 1,
+            uid=u.uid,
             display_name=u.username,
             handle=_safe_handle(u.username, u.uid[:8]),
             avatar=u.avatar,

@@ -5,7 +5,7 @@ from sqlalchemy import select, update, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import User, UserStats
+from .models import User, UserStats, UserProfile
 
 class UserRepository:
     def __init__(self, session: AsyncSession):
@@ -61,6 +61,12 @@ class UserRepository:
         
         # Manually attach stats so it's loaded 
         new_user.stats = stats
+        await self.upsert_user_profile(
+            firebase_uid=new_user.firebase_uid,
+            username=new_user.username,
+            email=new_user.email,
+            avatar_url=new_user.avatar_url,
+        )
         return new_user
 
     async def create_user_admin(
@@ -99,6 +105,12 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(new_user)
         new_user.stats = stats  # Gán thủ công vì lazy load chưa kịp thực thi
+        await self.upsert_user_profile(
+            firebase_uid=new_user.firebase_uid,
+            username=new_user.username,
+            email=new_user.email,
+            avatar_url=new_user.avatar_url,
+        )
         return new_user
 
     async def update_user(self, user: User, update_data: dict) -> User:
@@ -113,6 +125,12 @@ class UserRepository:
                 
         await self.session.commit()
         await self.session.refresh(user)
+        await self.upsert_user_profile(
+            firebase_uid=user.firebase_uid,
+            username=user.username,
+            email=user.email,
+            avatar_url=user.avatar_url,
+        )
         return user
         
     async def get_users_paginated(self, page: int, limit: int) -> Tuple[List[User], int]:
@@ -152,3 +170,31 @@ class UserRepository:
         await self.session.commit()
         await self.session.refresh(user)
         return user
+
+    async def upsert_user_profile(
+        self,
+        firebase_uid: str,
+        username: Optional[str] = None,
+        email: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> UserProfile:
+        """
+        Keep user_profiles.uid aligned with Firebase UID for search payloads.
+        """
+        profile = await self.session.get(UserProfile, firebase_uid)
+        if profile is None:
+            profile = UserProfile(
+                uid=firebase_uid,
+                username=username,
+                email=email,
+                avatar=avatar_url,
+            )
+            self.session.add(profile)
+        else:
+            profile.username = username if username is not None else profile.username
+            profile.email = email if email is not None else profile.email
+            profile.avatar = avatar_url if avatar_url is not None else profile.avatar
+
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return profile

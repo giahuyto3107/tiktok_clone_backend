@@ -43,6 +43,12 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
             logger.info(f"Created new local user for Firebase UID {uid}")
         else:
             logger.info(f"Logged in existing user Firebase UID {uid}")
+        await user_repo.upsert_user_profile(
+            firebase_uid=uid,
+            username=firebase_user.display_name,
+            email=firebase_user.email,
+            avatar_url=firebase_user.photo_url,
+        )
 
         return LoginResponse(
             user=local_user,

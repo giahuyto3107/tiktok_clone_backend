@@ -200,7 +200,7 @@ async def list_chats(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(1000, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Danh sách chat 1–1 cho user hiện tại (dùng cho màn inbox)."""
@@ -267,7 +267,7 @@ async def list_chats(
 async def list_inbox_contacts(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(1000, ge=1, le=2000),
     offset: int = Query(0, ge=0),
 ):
     """
@@ -316,7 +316,7 @@ async def list_messages(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(1000, ge=1, le=2000),
     offset: int = Query(0, ge=0),
 ):
     """Danh sách message trong 1 chat."""

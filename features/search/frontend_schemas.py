@@ -27,6 +27,7 @@ class FrontendUserItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: int = 0
+    uid: str = ""
     display_name: str = Field(default="", alias="displayName")
     handle: str = ""
     avatar: str = ""
