@@ -9,7 +9,7 @@ from database import get_db
 from features.post.models import PostType
 from features.post.router import _enrich_post, resolve_author
 from features.post.service import PostService
-from features.user.models import UserProfile
+from features.user.models import User, UserProfile
 from .schemas import SearchResponse, SearchUserItem, SearchVideoItem
 
 logger = logging.getLogger(__name__)
@@ -77,10 +77,24 @@ async def _search_users_db(
     )
     result = await db.execute(stmt)
     rows = result.scalars().all()
+    uid_candidates = [r.uid for r in rows]
+    uid_map: dict[str, str] = {}
+    if uid_candidates:
+        normalized_stmt = select(User.id, User.firebase_uid).where(
+            or_(
+                User.id.in_(uid_candidates),
+                User.firebase_uid.in_(uid_candidates),
+            )
+        )
+        normalized_result = await db.execute(normalized_stmt)
+        for user_id, firebase_uid in normalized_result.all():
+            uid_map[user_id] = firebase_uid
+            uid_map[firebase_uid] = firebase_uid
+
     return [
         SearchUserItem(
-            uid=r.uid,
-            username=r.username or r.email or r.uid[:8],
+            uid=uid_map.get(r.uid, r.uid),
+            username=r.username or r.email or uid_map.get(r.uid, r.uid)[:8],
             avatar=r.avatar or "",
         )
         for r in rows
