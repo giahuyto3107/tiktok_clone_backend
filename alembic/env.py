@@ -1,23 +1,29 @@
 from logging.config import fileConfig
 import asyncio
+import os
+import sys
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
-from app.core import settings
-from app.db import Base
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.modules.users.models import User
-from app.modules.user_settings.models import UserSettings
-from app.modules.weight_history.models import WeightHistory
-from app.modules.database_foods.models import DatabaseFoods
-from app.modules.nutrients.models import Nutrient
-from app.modules.food_nutrients.models import FoodNutrient
-from app.modules.user_plans.models import UserPlan
-from app.modules.daily_logs.models import DailyLog
-from app.modules.logged_foods.models import LoggedFood
+from database import Base, DATABASE_URL
+
+# Import all models for autogenerate support
+from features.post.models import Post  # noqa: F401
+from features.inbox.models import Chat, Message, MessageReceipt, ChatParticipant  # noqa: F401
+from features.social.follow.models import Follow  # noqa: F401
+from features.social.follow_notification.models import FollowNotification, FollowNotificationReceipt  # noqa: F401
+from features.social.comment.models import Comment, CommentLike  # noqa: F401
+from features.social.reaction.models import PostLike, PostSave  # noqa: F401
+from features.social.notification.models import SocialNotification, SocialNotificationReceipt  # noqa: F401
+from features.social.share.models import PostShare  # noqa: F401
+from features.user.models import UserProfile  # noqa: F401
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -55,10 +61,8 @@ def do_run_migrations(connection):
 async def run_async_migrations():
     """Tạo Engine Async và chạy migration"""
 
-    url = settings.DATABASE_URL
-
     connectable = create_async_engine(
-        url,
+        DATABASE_URL,
         poolclass=pool.NullPool,
     )
 
@@ -80,9 +84,8 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = settings.DATABASE_URL
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

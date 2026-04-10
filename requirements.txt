@@ -10,6 +10,10 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.21
 aiomysql==0.2.0
 greenlet==3.3.0
+python-dotenv==1.1.0
+aiofiles==24.1.0
+ffmpeg-python==0.2.0
+firebase-admin>=6.0.0
 
 # Development
 pytest==9.0.2
